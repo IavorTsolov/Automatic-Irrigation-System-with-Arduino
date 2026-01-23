@@ -9,3 +9,4 @@ Pump + ---> Battery + (3V)
 Pump – ---> TIP120 collector (C)
 TIP120 emitter (E) ---> Arduino GND + Battery –
 Arduino pin 9 ---> 1k resistor → TIP120 base (B)
+[Fabulous Bigery.pdf](https://github.com/user-attachments/files/24823738/Fabulous.Bigery.pdf)
