@@ -1,95 +1,82 @@
-// ===================================
-// 1. GLOBAL CONSTANTS AND VARIABLES
-// ===================================
+#include <Wire.h>
+#include <hd44780.h>
+#include <hd44780ioClass/hd44780_I2Cexp.h>
 
-const int sensorPin = A0; // Moisture sensor pin (Analog 0)
-const int pumpPin = 9; // TIP120 control pin (Digital 9)
+hd44780_I2Cexp lcd;
 
-// Higher reading = drier soil
-const int DRY_START = 700; // Start pump when soil is dry enough (>= 700)
-const int WET_STOP = 500; // Stop pump when soil is wet enough (<= 500)
+const int sensorPin = A0;
+const int pumpPin = 9;
+const int DRY_START = 400;
+const int WET_STOP  = 200;
 
-// Timing Variables
 unsigned long pumpStartTime = 0;
-const unsigned long maxPumpTime = 60000; // Pump runs max 60 seconds
-const unsigned long cooldownTime = 30000; // Wait 30 seconds after pumping
+const unsigned long maxPumpTime = 60000;
+const unsigned long cooldownTime = 30000;
 unsigned long lastPumpEnd = 0;
 
-bool pumpRunning = false; // Track pump state
-
-// ===================================
-// 2. SETUP FUNCTION
-// ===================================
+bool pumpRunning = false;
+unsigned long lastLCDUpdate = 0;
+unsigned long lastLCDCheck = 0;
 
 void setup() {
-Serial.begin(9600);
-pinMode(pumpPin, OUTPUT);
-digitalWrite(pumpPin, LOW); // Ensure pump is OFF at startup
-}
+  Serial.begin(9600);
+  pinMode(pumpPin, OUTPUT);
+  digitalWrite(pumpPin, LOW);
 
-// ===================================
-// 3. MAIN LOOP FUNCTION (Hysteresis Logic)
-// ===================================
+  lcd.begin(16,2);
+  lcd.backlight();
+  lcd.setCursor(0,0);
+}
 
 void loop() {
-unsigned long currentTime = millis();
-int moisture = analogRead(sensorPin);
+  unsigned long currentTime = millis();
+  int moisture = analogRead(sensorPin);
 
-// Debugging output
-Serial.print("Moisture: ");
-Serial.print(moisture);
-Serial.print(" | Pump State: ");
-Serial.println(pumpRunning ? "ON" : "OFF");
+  // Pump control logic
+  if(pumpRunning) {
+    if(moisture <= WET_STOP || currentTime - pumpStartTime >= maxPumpTime) {
+      digitalWrite(pumpPin, LOW);
+      pumpRunning = false;
+      lastPumpEnd = currentTime;
+    }
+  } else if(currentTime - lastPumpEnd >= cooldownTime && moisture >= DRY_START) {
+    digitalWrite(pumpPin, HIGH);
+    pumpRunning = true;
+    pumpStartTime = currentTime;
+  }
 
-// ----------------------------------------
-// LOGIC BLOCK 1: If Pump is currently ON
-// ----------------------------------------
-if (pumpRunning) {
-// Stop if max time reached
-if (currentTime - pumpStartTime >= maxPumpTime) {
-digitalWrite(pumpPin, LOW);
-pumpRunning = false;
-lastPumpEnd = currentTime;
-Serial.println(">>> STOPPING PUMP (Time Limit)");
-return;
-}
+  // Wetness %
+  int wetPercent = map(moisture, DRY_START, WET_STOP, 0, 100);
+  wetPercent = constrain(wetPercent,0,100);
 
-// Stop if soil is wet enough (lower reading = wetter)
-if (moisture <= WET_STOP) {
-  digitalWrite(pumpPin, LOW);
-  pumpRunning = false;
-  lastPumpEnd = currentTime;
-  Serial.println(">>> STOPPING PUMP (Soil Wet Enough)");
-  return;
-}
+  // -----------------------------
+  // LCD Update every 500ms
+  // -----------------------------
+  if(currentTime - lastLCDUpdate >= 500) {
+    lastLCDUpdate = currentTime;
 
-// Keep running; do not check cooldown while ON
-delay(500);
-return;
+    // Row 1: Wetness % + bar
+    lcd.setCursor(0,0);
+    lcd.print("Wet:");
+    lcd.print(wetPercent);
+    lcd.print("%   ");
 
-}
+    // Row 2: Pump + moisture
+    lcd.setCursor(0,1);
+    lcd.print(pumpRunning ? "PUMP: ON " : "PUMP: OFF");
+    lcd.setCursor(10,1);
+    lcd.print("M:");
+    lcd.print(moisture);
+  }
 
-// ----------------------------------------
-// LOGIC BLOCK 2: If Pump is OFF
-// ----------------------------------------
+  // -----------------------------
+  // LCD Auto-recovery every 10s
+  // -----------------------------
+  if(currentTime - lastLCDCheck >= 10000) {
+    lastLCDCheck = currentTime;
+    // Try to ping the LCD (just set cursor)
+    lcd.setCursor(0,0);
+  }
 
-// Cooldown after last pump
-if (currentTime - lastPumpEnd < cooldownTime) {
-Serial.println("Cooldown in effect. Waiting...");
-delay(500);
-return;
-}
-
-// Start if soil is dry enough (higher reading = drier)
-if (moisture >= DRY_START) {
-Serial.println(">>> STARTING PUMP (Soil Dry)");
-digitalWrite(pumpPin, HIGH);
-pumpRunning = true;
-pumpStartTime = currentTime;
-} else {
-Serial.println("Soil wet or adequate. Pump remains OFF.");
-digitalWrite(pumpPin, LOW);
-}
-
-delay(500); // Small delay for stability
+  delay(50); // small delay, non-blocking
 }
